@@ -131,54 +131,68 @@
         let trackingInterval = null;
         let isTracking = false;
 
-        // Request iPad browser push alert access immediately
         if (window.Notification && Notification.permission === "default") { 
             Notification.requestPermission(); 
         }
 
         async function fetchStockData(ticker) {
-            // Using a faster, premium-grade open CORS proxy server 
-            const targetUrl = `https://yahoo.com{ticker}`;
-            const proxyUrl = `https://corsproxy.io{encodeURIComponent(targetUrl)}`;
-            
-            const response = await fetch(proxyUrl);
-            if (!response.ok) throw new Error("Network connection error");
-            
-            const data = await response.json();
-            
-            // Fixed data mapping extraction safety safeguards
-            if (!data.chart || !data.chart.result || data.chart.result.length === 0) {
-                throw new Error("Invalid ticker symbol matching criteria");
+            try {
+                const targetUrl = `https://yahoo.com{ticker}?interval=1m&range=1d`;
+                const proxyUrl = `https://corsproxy.io{encodeURIComponent(targetUrl)}`;
+                
+                const response = await fetch(proxyUrl, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+                
+                if (!response.ok) throw new Error("Server communication roadblock");
+                
+                const data = await response.json();
+                
+                if (!data || !data.chart || !data.chart.result || data.chart.result.length === 0) {
+                    throw new Error("Bad ticker response format");
+                }
+                
+                const meta = data.chart.result.meta;
+                const currentPrice = meta.regularMarketPrice;
+                const previousClose = meta.chartPreviousClose;
+                
+                if (!currentPrice || !previousClose) {
+                    throw new Error("Missing active price fields");
+                }
+                
+                const changePercent = ((currentPrice - previousClose) / previousClose) * 100;
+                
+                return {
+                    ticker: ticker.toUpperCase(),
+                    price: currentPrice,
+                    change: changePercent
+                };
+            } catch (err) {
+                throw new Error("Data parsing failed: " + err.message);
             }
-            
-            const meta = data.chart.result[0].meta;
-            const currentPrice = meta.regularMarketPrice;
-            const previousClose = meta.chartPreviousClose;
-            const changePercent = ((currentPrice - previousClose) / previousClose) * 100;
-            
-            return {
-                ticker: ticker.toUpperCase(),
-                price: currentPrice,
-                change: changePercent
-            };
         }
 
         async function spotCheckPrimaryStock() {
             const sst = document.getElementById('sst').value.toUpperCase().trim();
+            const div = document.getElementById('spotCheckResult');
+            
             if (!sst) {
                 alert("Please specify a primary ticker symbol asset first.");
                 return;
             }
             
-            const div = document.getElementById('spotCheckResult');
             div.innerText = "Querying Live Servers...";
+            div.style.color = "white";
             
             try {
                 const data = await fetchStockData(sst);
                 div.innerText = `${data.ticker}: $${data.price.toFixed(2)} USD. 1D Change: ${data.change.toFixed(2)}%`;
+                div.style.color = "var(--success)";
             } catch (error) {
+                div.innerText = "Error: System security block or invalid ticker.";
+                div.style.color = "var(--danger)";
                 console.error(error);
-                div.innerText = "Error pulling data. Verify ticker layout or network link.";
             }
         }
 
@@ -199,7 +213,7 @@
                     processTriggeredAlert(message);
                 }
             } catch (e) {
-                // Fails quietly in background checking loops to prevent breaking app
+                // Fails silently in background checking loops
             }
         }
 
@@ -228,12 +242,8 @@
             const p = parseFloat(document.getElementById('p').value);
             const enabled = document.getElementById('browser_notifications_enabled').value === "true";
 
-            if (sst) {
-                await checkTickerThreshold(sst, p, enabled);
-            }
-            if (sst2) {
-                await checkTickerThreshold(sst2, p, enabled);
-            }
+            if (sst) await checkTickerThreshold(sst, p, enabled);
+            if (sst2) await checkTickerThreshold(sst2, p, enabled);
         }
 
         function toggleTrackingLoop() {
@@ -279,9 +289,11 @@
                 osc.start();
                 osc.stop(audioCtx.currentTime + 0.15); 
             } catch(e) {
-                console.log("Audio play blocked by browser interaction guidelines.");
+                console.log("Audio pipeline blocked by iPad policy settings.");
             }
         }
     </script>
 </body>
 </html>
+
+    
